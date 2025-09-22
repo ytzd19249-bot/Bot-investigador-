@@ -1,61 +1,38 @@
-from fastapi import FastAPI
-import requests
+from fastapi import FastAPI, Request
+import httpx
 import os
-from dotenv import load_dotenv
-import pandas as pd
-from bs4 import BeautifulSoup
 
-# Cargar variables de entorno
-load_dotenv()
+app = FastAPI()
 
-HOTMART_TOKEN = os.getenv("HOTMART_TOKEN")
-BOT_VENTAS_URL = os.getenv("BOT_VENTAS_URL")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-app = FastAPI(title="Bot Investigador", version="1.0")
-
-# 🔎 Endpoint para probar
 @app.get("/")
-def root():
+async def root():
     return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
 
-# 🔎 Ejemplo de búsqueda en Hotmart (simulado por ahora)
-@app.get("/investigar/hotmart")
-def investigar_hotmart():
-    # Aquí iría la integración real con la API de Hotmart
-    productos = [
-        {"nombre": "Curso de Marketing Digital", "precio": 49.99, "link": "https://hotmart.com/curso1"},
-        {"nombre": "Guía Keto Premium", "precio": 29.99, "link": "https://hotmart.com/curso2"}
-    ]
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
 
-    # Enviar al bot de ventas
-    if BOT_VENTAS_URL:
-        try:
-            requests.post(BOT_VENTAS_URL, json={"productos": productos})
-        except Exception as e:
-            return {"status": "error", "detalle": str(e)}
+        if "message" in data:
+            chat_id = data["message"]["chat"]["id"]
+            text = data["message"].get("text", "")
 
-    return {"status": "ok", "productos": productos}
+            if text.lower() == "/start":
+                reply = "Hola 👋, soy el *Bot Investigador*. Estoy listo para buscar nichos y productos 🔎"
+            else:
+                reply = f"Recibí tu mensaje: {text}"
 
-# 🔎 Ejemplo scraping de Amazon (búsqueda básica)
-@app.get("/investigar/amazon")
-def investigar_amazon():
-    url = "https://www.amazon.com/s?k=laptop"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = requests.get(url, headers=headers)
+            # responder al usuario
+            async with httpx.AsyncClient() as client:
+                await client.post(f"{BASE_URL}/sendMessage", json={
+                    "chat_id": chat_id,
+                    "text": reply,
+                    "parse_mode": "Markdown"
+                })
 
-    if resp.status_code != 200:
-        return {"status": "error", "detalle": "No se pudo acceder a Amazon"}
-
-    soup = BeautifulSoup(resp.text, "lxml")
-    titulos = [t.get_text() for t in soup.select("h2 span")[:5]]
-
-    productos = [{"nombre": t, "precio": "N/A"} for t in titulos]
-
-    # Enviar al bot de ventas
-    if BOT_VENTAS_URL:
-        try:
-            requests.post(BOT_VENTAS_URL, json={"productos": productos})
-        except Exception as e:
-            return {"status": "error", "detalle": str(e)}
-
-    return {"status": "ok", "productos": productos}
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
