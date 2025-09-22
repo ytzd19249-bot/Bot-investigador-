@@ -1,25 +1,36 @@
-import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from models import Base, Producto
+from datetime import datetime
+import os
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bot.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class Producto(Base):
+    __tablename__ = "productos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String, nullable=False)
+    precio = Column(Float, nullable=True)
+    comision = Column(Float, nullable=True)
+    link = Column(String, nullable=True)
+    creado_en = Column(DateTime, default=datetime.utcnow)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
 
-def guardar_producto(data):
-    session = SessionLocal()
+def guardar_producto(nombre, precio, comision, link):
+    db = SessionLocal()
     producto = Producto(
-        id=data["id"],
-        name=data["name"],
-        price=data.get("price", 0),
-        commission=data.get("commissions", [{}])[0].get("value", 0),
-        affiliate_link=data.get("affiliate_link", "")
+        nombre=nombre,
+        precio=precio,
+        comision=comision,
+        link=link
     )
-    session.merge(producto)
-    session.commit()
-    session.close()
+    db.add(producto)
+    db.commit()
+    db.close()
