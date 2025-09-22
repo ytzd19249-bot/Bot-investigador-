@@ -1,34 +1,31 @@
-import os
 import httpx
-import logging
+import os
 
-logger = logging.getLogger("hotmart_api")
+CLIENT_ID = os.getenv("HOTMART_CLIENT_ID")
+CLIENT_SECRET = os.getenv("HOTMART_CLIENT_SECRET")
 
-HOTMART_API_URL = "https://api-sec-vlc.hotmart.com"
-HOTMART_TOKEN = os.getenv("HOTMART_TOKEN", "TOKEN_DEMO")
+BASE_URL = "https://api-sec-vlc.hotmart.com"
 
 async def obtener_productos():
-    url = f"{HOTMART_API_URL}/products"
-    headers = {"Authorization": f"Bearer {HOTMART_TOKEN}"}
+    headers = {
+        "Authorization": f"Basic {os.getenv('HOTMART_BASIC')}"
+    }
     async with httpx.AsyncClient() as client:
-        resp = await client.get(url, headers=headers)
-        if resp.status_code != 200:
-            logger.error(f"Error obteniendo productos: {resp.text}")
-            return []
-        return resp.json().get("items", [])
+        r = await client.get(f"{BASE_URL}/catalog/products", headers=headers)
+        if r.status_code == 200:
+            return r.json().get("items", [])
+        return []
 
 def filtrar_productos(productos):
     return [
         p for p in productos
-        if p.get("commissions", [{}])[0].get("value", 0) > 5
+        if p.get("price", 0) > 0 and p.get("commission", 0) > 0
     ]
 
 async def afiliar_producto(product_id):
-    url = f"{HOTMART_API_URL}/products/{product_id}/affiliate"
-    headers = {"Authorization": f"Bearer {HOTMART_TOKEN}"}
+    headers = {
+        "Authorization": f"Basic {os.getenv('HOTMART_BASIC')}"
+    }
     async with httpx.AsyncClient() as client:
-        resp = await client.post(url, headers=headers)
-        if resp.status_code != 200:
-            logger.error(f"Error afiliando producto {product_id}: {resp.text}")
-            return None
-        return resp.json().get("affiliate_link", "enlace_demo")
+        r = await client.post(f"{BASE_URL}/affiliate/{product_id}", headers=headers)
+        return r.status_code == 200
