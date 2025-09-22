@@ -1,74 +1,62 @@
-from fastapi import FastAPI, Request
-import requests
 import os
 import logging
+import requests
+from fastapi import FastAPI, Request
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# --- Configuración ---
-app = FastAPI()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+from hotmart_api import obtener_productos, filtrar_productos
 
-HOTMART_CLIENT_ID = os.getenv("HOTMART_CLIENT_ID")
-HOTMART_CLIENT_SECRET = os.getenv("HOTMART_CLIENT_SECRET")
-HOTMART_API_URL = "https://api-sec-vlc.hotmart.com"
-
-# --- Logger ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Endpoint principal que recibe mensajes de Telegram ---
-@app.post("/")
-async def telegram_webhook(req: Request):
-    data = await req.json()
+# Variables de entorno
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        text = data["message"].get("text", "")
+app = FastAPI()
+scheduler = BackgroundScheduler()
 
-        if text == "/start":
-            send_message(chat_id, "🤖 Bot Investigador funcionando 🚀")
-        else:
-            send_message(chat_id, f"Recibí tu mensaje: {text}")
+# --- Función para mandar mensajes a Telegram ---
+def enviar_mensaje(mensaje: str):
+    if not BOT_TOKEN or not CHAT_ID:
+        logger.warning("⚠️ No hay BOT_TOKEN o CHAT_ID configurados")
+        return
+    try:
+        url = f"{BASE_URL}/sendMessage"
+        data = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}
+        requests.post(url, data=data)
+        logger.info("📩 Mensaje enviado a Telegram")
+    except Exception as e:
+        logger.error(f"❌ Error enviando mensaje a Telegram: {e}")
 
+# --- Función principal de investigación ---
+def investigar_hotmart():
+    logger.info("🔎 Investigando productos en Hotmart...")
+
+    productos = obtener_productos()
+    filtrados = filtrar_productos(productos)
+
+    if not filtrados:
+        enviar_mensaje("⚠️ No se encontraron productos rentables en este momento.")
+    else:
+        for prod in filtrados:
+            mensaje = (
+                f"✅ *{prod['nombre']}*\n"
+                f"📊 Ventas: {prod['ventas']}\n"
+                f"💵 Comisión: ${prod['comision']}"
+            )
+            enviar_mensaje(mensaje)
+
+# --- Webhook de Telegram (evita 404) ---
+@app.post("/webhook/{token}")
+async def webhook(token: str, request: Request):
     return {"ok": True}
 
-# --- Enviar mensajes a Telegram ---
-def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    try:
-        requests.post(url, json=payload)
-    except Exception as e:
-        logger.error(f"Error enviando mensaje: {e}")
-
-# --- Configurar webhook al iniciar ---
+# --- Arranque automático ---
 @app.on_event("startup")
 async def startup_event():
-    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}"
-    r = requests.get(url)
-    logger.info(f"Webhook configurado: {r.json()}")
-
-# --- Endpoint de prueba ---
-@app.get("/")
-async def home():
-    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
-
-# --- Función de investigación automática (ejemplo inicial) ---
-def investigar_hotmart():
-    logger.info("🔎 Buscando productos en Hotmart...")
-
-    # Aquí en futuro: pedir productos reales con HOTMART API
-    productos = [
-        {"nombre": "Curso de Finanzas", "comision": "40%"},
-        {"nombre": "Recetario Saludable", "comision": "30%"},
-        {"nombre": "Guía de Inversiones", "comision": "50%"},
-    ]
-
-    logger.info(f"Productos investigados: {productos}")
-    # Aquí se podría guardar en base de datos
-
-# --- Programar tarea automática cada 2 horas ---
-scheduler = BackgroundScheduler()
-scheduler.add_job(investigar_hotmart, "interval", hours=2)
-scheduler.start()
+    logger.info("🚀 Iniciando bot investigador...")
+    scheduler.add_job(investigar_hotmart, "interval", hours=6)  # cada 6 horas
+    scheduler.start()
+    investigar_hotmart()  # ejecuta apenas arranca
