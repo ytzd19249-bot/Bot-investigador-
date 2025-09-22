@@ -2,9 +2,9 @@ services:
   - type: worker
     name: investigador-bot
     env: python
+    plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
-    plan: free
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -16,7 +16,13 @@ services:
         sync: false
       - key: SCRAPE_INTERVAL_MINUTES
         sync: false
+      - key: TOP_K_PRODUCTS
+        sync: false
       - key: AFFILIATION_AUTO_APPROVE
         sync: false
-      - key: TOP_K_PRODUCTS
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ADMIN_TOKEN
         sync: false
