@@ -1,40 +1,41 @@
-import os
 from fastapi import FastAPI, Request
 import requests
+import os
 
 app = FastAPI()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# Ruta principal para revisar que el bot está vivo
-@app.get("/")
-async def root():
-    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
-
-# Ruta para recibir mensajes desde Telegram
-@app.post(f"/webhook/{TELEGRAM_TOKEN}")
-async def telegram_webhook(request: Request):
-    data = await request.json()
+# --- Endpoint principal que recibe los mensajes de Telegram ---
+@app.post("/")
+async def telegram_webhook(req: Request):
+    data = await req.json()
 
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
 
-        reply = f"👋 Hola, soy el InvestigadorDigitalBot.\n\nMe escribiste: {text}"
+        if text == "/start":
+            send_message(chat_id, "Bot Investigador funcionando 🚀")
+        else:
+            send_message(chat_id, f"Recibí tu mensaje: {text}")
 
-        # Responder al usuario
-        requests.post(f"{TELEGRAM_API_URL}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": reply
-        })
+    return {"ok": True}
 
-    return {"status": "ok"}
+# --- Función para enviar mensajes ---
+def send_message(chat_id, text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    requests.post(url, json=payload)
 
-# Configurar webhook automáticamente al iniciar
+# --- Configuración del webhook cuando inicia la app ---
 @app.on_event("startup")
-async def set_webhook():
-    if TELEGRAM_TOKEN and WEBHOOK_URL:
-        full_webhook_url = f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}"
-        requests.get(f"{TELEGRAM_API_URL}/setWebhook?url={full_webhook_url}")
+async def startup_event():
+    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}"
+    r = requests.get(url)
+    print("Webhook configurado:", r.json())
+
+@app.get("/")
+async def home():
+    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
