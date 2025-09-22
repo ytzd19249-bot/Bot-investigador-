@@ -1,33 +1,25 @@
-import os
-import requests
+import logging
+import httpx
 
-HOTMART_CLIENT_ID = os.getenv("HOTMART_CLIENT_ID")
-HOTMART_CLIENT_SECRET = os.getenv("HOTMART_CLIENT_SECRET")
-HOTMART_API_URL = "https://api-sec-vlc.hotmart.com"
-
-def obtener_token():
-    url = "https://api-sec-vlc.hotmart.com/security/oauth/token"
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": HOTMART_CLIENT_ID,
-        "client_secret": HOTMART_CLIENT_SECRET
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    r = requests.post(url, data=payload, headers=headers)
-    r.raise_for_status()
-    return r.json().get("access_token")
+logger = logging.getLogger("hotmart_api")
 
 def obtener_productos():
-    token = obtener_token()
-    url = f"{HOTMART_API_URL}/catalog/rest/v2/products"
-    headers = {"Authorization": f"Bearer {token}"}
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-    return r.json().get("items", [])
+    # Aquí va el request real a Hotmart con tu token
+    productos = [
+        {"id": 101, "nombre": "Curso de Marketing Digital", "precio": 49.99, "comision": 25, "estado": "activo"},
+        {"id": 102, "nombre": "Guía de Recetas Veganas", "precio": 19.99, "comision": 5, "estado": "activo"},
+        {"id": 103, "nombre": "Ebook Negocios Online", "precio": 9.99, "comision": 0, "estado": "inactivo"},
+    ]
+    return productos
 
 def filtrar_productos(productos):
-    # Se queda solo con los más vendidos y los que tengan comisiones
-    return [
-        p for p in productos
-        if p.get("commission") and p.get("salesPage")
-    ]
+    return [p for p in productos if p["estado"] == "activo" and p["comision"] > 0]
+
+def afiliar_producto(producto_id, token="FAKE_TOKEN"):
+    """
+    Simulación de afiliación en Hotmart.
+    En la vida real aquí usamos el endpoint oficial con tu token.
+    """
+    logger.info(f"📩 Solicitando afiliación al producto {producto_id}...")
+    # Simulación de respuesta positiva
+    return {"status": "success", "producto_id": producto_id, "afiliado": True}
