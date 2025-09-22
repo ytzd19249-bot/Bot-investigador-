@@ -1,38 +1,55 @@
 from fastapi import FastAPI, Request
-import httpx
+import requests
 import os
 
 app = FastAPI()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+# ==============================
+# Variables de entorno necesarias
+# ==============================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Token del InvestigadorDigitalBot
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")   # URL pública de Render
 
+# ==============================
+# Endpoint raíz (chequeo de vida)
+# ==============================
 @app.get("/")
-async def root():
-    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
+def home():
+    return {"status": "ok", "message": "🤖 Bot Investigador funcionando 🚀"}
 
-@app.post("/webhook")
+# ==============================
+# Endpoint Webhook de Telegram
+# ==============================
+@app.post(f"/webhook/{TELEGRAM_TOKEN}")
 async def telegram_webhook(request: Request):
-    try:
-        data = await request.json()
+    data = await request.json()
 
-        if "message" in data:
-            chat_id = data["message"]["chat"]["id"]
-            text = data["message"].get("text", "")
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        text = data["message"].get("text", "")
 
-            if text.lower() == "/start":
-                reply = "Hola 👋, soy el *Bot Investigador*. Estoy listo para buscar nichos y productos 🔎"
-            else:
-                reply = f"Recibí tu mensaje: {text}"
+        # Respuesta básica
+        if text == "/start":
+            send_message(chat_id, "👋 Hola, soy el *Bot Investigador* 🔎. ¡Listo para ayudarte!")
+        else:
+            send_message(chat_id, f"Recibí tu mensaje: {text}")
 
-            # responder al usuario
-            async with httpx.AsyncClient() as client:
-                await client.post(f"{BASE_URL}/sendMessage", json={
-                    "chat_id": chat_id,
-                    "text": reply,
-                    "parse_mode": "Markdown"
-                })
+    return {"ok": True}
 
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+# ==============================
+# Función para enviar mensajes
+# ==============================
+def send_message(chat_id, text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    requests.post(url, json=payload)
+
+# ==============================
+# Configuración del webhook
+# ==============================
+@app.on_event("startup")
+def set_webhook():
+    if WEBHOOK_URL:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook"
+        payload = {"url": f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}"}
+        requests.post(url, json=payload)
