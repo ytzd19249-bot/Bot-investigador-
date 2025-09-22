@@ -1,23 +1,19 @@
 import os
-import requests
 from fastapi import FastAPI, Request
+import requests
 
 app = FastAPI()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-ADMIN_ID = os.getenv("ADMIN_ID")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# =========================
-# Endpoint principal
-# =========================
+# Ruta principal para revisar que el bot está vivo
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
 
-# =========================
-# Webhook de Telegram
-# =========================
+# Ruta para recibir mensajes desde Telegram
 @app.post(f"/webhook/{TELEGRAM_TOKEN}")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -26,28 +22,19 @@ async def telegram_webhook(request: Request):
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
 
-        if text == "/start":
-            send_message(chat_id, "👋 Hola, soy el Bot Investigador. Envíame un producto y lo analizaré.")
-        else:
-            send_message(chat_id, f"📩 Recibí tu mensaje: {text}")
+        reply = f"👋 Hola, soy el InvestigadorDigitalBot.\n\nMe escribiste: {text}"
 
-    return {"ok": True}
+        # Responder al usuario
+        requests.post(f"{TELEGRAM_API_URL}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": reply
+        })
 
-# =========================
-# Función para enviar mensajes
-# =========================
-def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    requests.post(url, json=payload)
+    return {"status": "ok"}
 
-# =========================
-# Configuración del webhook
-# =========================
+# Configurar webhook automáticamente al iniciar
 @app.on_event("startup")
-def set_webhook():
-    if WEBHOOK_URL and TELEGRAM_TOKEN:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook"
-        payload = {"url": f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}"}
-        requests.post(url, json=payload)
-        print("✅ Webhook configurado correctamente")
+async def set_webhook():
+    if TELEGRAM_TOKEN and WEBHOOK_URL:
+        full_webhook_url = f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}"
+        requests.get(f"{TELEGRAM_API_URL}/setWebhook?url={full_webhook_url}")
