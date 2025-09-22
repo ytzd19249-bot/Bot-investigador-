@@ -1,45 +1,32 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+# db.py
 import os
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, Boolean
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.sql import func
 
-# Leer la variable DATABASE_URL desde Render
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("Set DATABASE_URL env var")
 
-# Conexión a la base
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-
+engine = create_engine(DATABASE_URL, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 Base = declarative_base()
 
-# Modelo de tabla productos
 class Producto(Base):
     __tablename__ = "productos"
-
     id = Column(Integer, primary_key=True, index=True)
-    nombre = Column(String, index=True)
-    categoria = Column(String)
-    precio = Column(Float)
-    link_afiliado = Column(String)
+    external_id = Column(String(255), unique=True, index=True)
+    nombre = Column(String(512))
+    categoria = Column(String(255), index=True)
+    precio = Column(Float, nullable=True)
+    comision = Column(String(50), nullable=True)
+    link_afiliado = Column(Text, nullable=True)
+    imagen_url = Column(Text, nullable=True)
+    descripcion = Column(Text, nullable=True)
+    fuente = Column(String(50), index=True)
+    score = Column(Float, default=0.0)
+    afiliado = Column(Boolean, default=False)
+    fecha_detectado = Column(DateTime(timezone=True), server_default=func.now())
 
-# Crear las tablas si no existen
 def init_db():
     Base.metadata.create_all(bind=engine)
-
-# Guardar un producto de prueba
-def guardar_producto():
-    session = SessionLocal()
-    nuevo_producto = Producto(
-        nombre="Curso de Inteligencia Artificial",
-        categoria="Educación",
-        precio=49.99,
-        link_afiliado="https://go.hotmart.com/abc123"
-    )
-    session.add(nuevo_producto)
-    session.commit()
-    session.close()
-    print("✅ Producto de prueba guardado en la base")
-
-if __name__ == "__main__":
-    init_db()
-    guardar_producto()
