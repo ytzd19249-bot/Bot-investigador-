@@ -1,36 +1,34 @@
-import os
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import httpx
+import requests
+import os
 
 app = FastAPI()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+# Token del bot (asegurate que lo pongas en las variables de entorno en Render)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-@app.post(f"/webhook/{BOT_TOKEN}")
-async def webhook(request: Request):
+@app.get("/")
+async def root():
+    return {"status": "Bot Investigador funcionando 🚀"}
+
+# 🔹 Endpoint que Telegram necesita para enviar los mensajes
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
     data = await request.json()
+    print("📩 Mensaje recibido:", data)
 
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
 
-        if text == "/start":
-            reply = "🤖 Bot Investigador funcionando 🚀"
-        elif text == "/status":
-            reply = "✅ Estado: Activo y escuchando 👂"
-        else:
-            reply = f"Recibí tu mensaje: {text}"
+        # Responder con un eco básico
+        reply = f"Recibí tu mensaje: {text}"
+        send_message(chat_id, reply)
 
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{TELEGRAM_API_URL}/sendMessage",
-                json={"chat_id": chat_id, "text": reply}
-            )
+    return {"ok": True}
 
-    return JSONResponse(content={"status": "ok"})
-
-@app.get("/")
-async def root():
-    return {"status": "Bot Investigador funcionando 🚀"}
+def send_message(chat_id, text):
+    url = f"{BOT_URL}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    requests.post(url, json=payload)
