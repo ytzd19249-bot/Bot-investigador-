@@ -1,8 +1,17 @@
-# Bot Investigador
+# 🤖 Bot Investigador
 
-Este es el primer módulo de un sistema de 3 bots (Investigación, Ventas y Publicidad).
+Este bot se encarga de **investigar productos en Hotmart y Amazon** y enviarlos al bot de ventas.
 
-## Funcionalidad
-- Buscar productos en Amazon y Hotmart
-- Guardar la información en JSON
-- Preparar los datos para que el Bot de Ventas pueda usarlos
+## 🚀 Tecnologías
+- Python 3
+- FastAPI
+- Render (deploy)
+
+## 📂 Archivos principales
+- `main.py`: Código principal del bot investigador.
+- `requirements.txt`: Librerías necesarias.
+- `Procfile`: Instrucciones para Render.
+- `.env`: Variables de entorno.
+
+## 🔧 Variables de entorno
+Crea un archivo `.env` con:
