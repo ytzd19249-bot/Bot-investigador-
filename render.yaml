@@ -1,28 +1,16 @@
 services:
-  - type: worker
-    name: investigador-bot
+  - type: web
+    name: bot-investigador
     env: python
-    plan: free
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port 10000"
+    plan: free
     envVars:
-      - key: DATABASE_URL
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
         sync: false
       - key: HOTMART_CLIENT_ID
         sync: false
       - key: HOTMART_CLIENT_SECRET
-        sync: false
-      - key: HOTMART_API_BASE
-        sync: false
-      - key: SCRAPE_INTERVAL_MINUTES
-        sync: false
-      - key: TOP_K_PRODUCTS
-        sync: false
-      - key: AFFILIATION_AUTO_APPROVE
-        sync: false
-      - key: TELEGRAM_TOKEN
-        sync: false
-      - key: ADMIN_CHAT_ID
-        sync: false
-      - key: ADMIN_TOKEN
         sync: false
