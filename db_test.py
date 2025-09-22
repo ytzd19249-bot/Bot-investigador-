@@ -1,32 +1,50 @@
 # db.py
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, Boolean
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.sql import func
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from models import Base, Producto
+from datetime import datetime
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 if not DATABASE_URL:
-    raise RuntimeError("Set DATABASE_URL env var")
+    raise RuntimeError("Falta DATABASE_URL en variables de entorno")
 
-engine = create_engine(DATABASE_URL, future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-Base = declarative_base()
-
-class Producto(Base):
-    __tablename__ = "productos"
-    id = Column(Integer, primary_key=True, index=True)
-    external_id = Column(String(255), unique=True, index=True)
-    nombre = Column(String(512))
-    categoria = Column(String(255), index=True)
-    precio = Column(Float, nullable=True)
-    comision = Column(String(50), nullable=True)
-    link_afiliado = Column(Text, nullable=True)
-    imagen_url = Column(Text, nullable=True)
-    descripcion = Column(Text, nullable=True)
-    fuente = Column(String(50), index=True)
-    score = Column(Float, default=0.0)
-    afiliado = Column(Boolean, default=False)
-    fecha_detectado = Column(DateTime(timezone=True), server_default=func.now())
+# engine sync (sencillo y compatible)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+
+def guardar_producto(data: dict):
+    """
+    Inserta o actualiza producto en DB (merge por producto_id).
+    data debe traer: id, nombre, precio, moneda, comision, ventas, link
+    """
+    session = SessionLocal()
+    try:
+        producto = session.query(Producto).filter(Producto.producto_id == str(data["id"])).first()
+        if not producto:
+            producto = Producto(
+                producto_id=str(data["id"]),
+                nombre=data.get("nombre"),
+                precio=data.get("precio"),
+                moneda=data.get("moneda"),
+                comision=data.get("comision"),
+                ventas=data.get("ventas"),
+                link_afiliado=data.get("link") or data.get("link_afiliado")
+            )
+            session.add(producto)
+        else:
+            producto.nombre = data.get("nombre", producto.nombre)
+            producto.precio = data.get("precio", producto.precio)
+            producto.comision = data.get("comision", producto.comision)
+            producto.ventas = data.get("ventas", producto.ventas)
+            producto.link_afiliado = data.get("link", producto.link_afiliado)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise
+    finally:
+        session.close()
