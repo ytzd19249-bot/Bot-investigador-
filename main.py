@@ -1,32 +1,59 @@
-import logging
-from fastapi import FastAPI
+import os
+import asyncio
+from fastapi import FastAPI, Request
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from hotmart_api import obtener_productos, filtrar_productos, afiliar_producto
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("main")
-
 app = FastAPI()
+
+# =====================================================
+# 🔁 Tarea principal del bot investigador
+# =====================================================
+async def investigar_hotmart():
+    print("🔎 Iniciando investigación de productos...")
+
+    try:
+        productos = await obtener_productos()
+        print(f"📦 Productos encontrados: {len(productos)}")
+
+        seleccionados = filtrar_productos(productos)
+        print(f"✅ Productos filtrados: {len(seleccionados)}")
+
+        for producto in seleccionados:
+            producto_id = producto["id"]
+            nombre = producto["nombre"]
+            comision = producto["comision"]
+            ventas = producto["ventas"]
+
+            print(f"➡️ Producto elegido: {nombre} | Comisión: {comision} | Ventas: {ventas}")
+
+            # Afiliación automática
+            afiliado = await afiliar_producto(producto_id)
+            if afiliado:
+                print(f"🤝 Afiliado al producto {producto_id} ({nombre})")
+
+    except Exception as e:
+        print(f"❌ Error en investigación: {e}")
+
+# =====================================================
+# ⏰ Scheduler para ejecutar la investigación automáticamente
+# =====================================================
 scheduler = AsyncIOScheduler()
+scheduler.add_job(investigar_hotmart, "interval", hours=12)  # 2 veces al día
+scheduler.start()
 
-def investigar_hotmart():
-    logger.info("🔎 Iniciando investigación automática de productos...")
-    productos = obtener_productos()
-    seleccionados = filtrar_productos(productos)
+# =====================================================
+# 🌐 Endpoint raíz
+# =====================================================
+@app.get("/")
+async def root():
+    return {"status": "Bot Investigador funcionando 🚀"}
 
-    if seleccionados:
-        for p in seleccionados:
-            logger.info(f"✅ Producto válido: {p['nombre']} | Precio: {p['precio']} | Comisión: {p['comision']}")
-            resultado = afiliar_producto(p["id"])
-            if resultado["afiliado"]:
-                logger.info(f"🤝 Afiliación exitosa al producto {p['nombre']}")
-            else:
-                logger.warning(f"⚠️ No se pudo afiliar al producto {p['nombre']}")
-    else:
-        logger.warning("⚠️ No se encontraron productos válidos en esta ejecución.")
-
-@app.on_event("startup")
-async def startup_event():
-    scheduler.add_job(investigar_hotmart, "cron", hour="9,18")  # 2 veces al día
-    scheduler.start()
-    logger.info("🚀 Bot Investigador iniciado. Ejecutando automáticamente 2 veces al día.")
+# =====================================================
+# 📩 Webhook (para Telegram u otros si se necesita después)
+# =====================================================
+@app.post("/webhook/{token}")
+async def telegram_webhook(token: str, request: Request):
+    data = await request.json()
+    print(f"📩 Webhook recibido: {data}")
+    return {"ok": True}
