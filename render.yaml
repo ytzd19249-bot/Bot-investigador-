@@ -1,16 +1,18 @@
+databases:
+  - name: hotmart-db
+    plan: free
+    databaseName: hotmart
 services:
   - type: web
     name: bot-investigador
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port 10000"
     plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     envVars:
-      - key: TELEGRAM_TOKEN
-        sync: false
-      - key: WEBHOOK_URL
-        sync: false
-      - key: HOTMART_CLIENT_ID
-        sync: false
-      - key: HOTMART_CLIENT_SECRET
-        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hotmart-db
+          property: connectionString
