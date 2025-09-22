@@ -1,14 +1,11 @@
 from fastapi import FastAPI
 
-# Crear la app de FastAPI
 app = FastAPI()
 
-# Ruta principal para verificar que funciona
 @app.get("/")
 def home():
     return {"message": "🤖 Bot Investigador en Render funcionando 🚀"}
 
-# Ruta de prueba para simular búsqueda de productos
 @app.get("/buscar")
 def buscar(producto: str = "ejemplo"):
     resultados = [
