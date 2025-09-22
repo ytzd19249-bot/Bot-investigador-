@@ -1,62 +1,57 @@
-import os
-import logging
-import requests
 from fastapi import FastAPI, Request
-from apscheduler.schedulers.background import BackgroundScheduler
-
+import requests, os, logging
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from hotmart_api import obtener_productos, filtrar_productos
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Variables de entorno
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
 app = FastAPI()
-scheduler = BackgroundScheduler()
+logging.basicConfig(level=logging.INFO)
 
-# --- Función para mandar mensajes a Telegram ---
-def enviar_mensaje(mensaje: str):
-    if not BOT_TOKEN or not CHAT_ID:
-        logger.warning("⚠️ No hay BOT_TOKEN o CHAT_ID configurados")
-        return
-    try:
-        url = f"{BASE_URL}/sendMessage"
-        data = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}
-        requests.post(url, data=data)
-        logger.info("📩 Mensaje enviado a Telegram")
-    except Exception as e:
-        logger.error(f"❌ Error enviando mensaje a Telegram: {e}")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# --- Función principal de investigación ---
-def investigar_hotmart():
-    logger.info("🔎 Investigando productos en Hotmart...")
+# --- Enviar mensajes a Telegram
+def send_message(chat_id, text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    requests.post(url, json=payload)
 
-    productos = obtener_productos()
-    filtrados = filtrar_productos(productos)
+# --- Webhook de Telegram
+@app.post("/")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        text = data["message"].get("text", "")
 
-    if not filtrados:
-        enviar_mensaje("⚠️ No se encontraron productos rentables en este momento.")
-    else:
-        for prod in filtrados:
-            mensaje = (
-                f"✅ *{prod['nombre']}*\n"
-                f"📊 Ventas: {prod['ventas']}\n"
-                f"💵 Comisión: ${prod['comision']}"
+        if text == "/start":
+            send_message(chat_id, "🤖 Bot Investigador funcionando 🚀")
+        elif text == "/productos":
+            productos = obtener_productos()
+            top = filtrar_productos(productos)[:5]
+            respuesta = "\n\n".join(
+                [f"🔥 {p['name']}\n💲 Comisión: {p['commission']['value']}" for p in top]
             )
-            enviar_mensaje(mensaje)
-
-# --- Webhook de Telegram (evita 404) ---
-@app.post("/webhook/{token}")
-async def webhook(token: str, request: Request):
+            send_message(chat_id, respuesta or "No encontré productos ahora mismo")
+        else:
+            send_message(chat_id, f"Recibí tu mensaje: {text}")
     return {"ok": True}
 
-# --- Arranque automático ---
+# --- Tarea automática: investiga cada hora
+def investigar_hotmart():
+    productos = obtener_productos()
+    buenos = filtrar_productos(productos)
+    logging.info(f"Productos investigados: {len(buenos)}")
+
+scheduler = AsyncIOScheduler()
+scheduler.add_job(investigar_hotmart, "interval", hours=1)
+scheduler.start()
+
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 Iniciando bot investigador...")
-    scheduler.add_job(investigar_hotmart, "interval", hours=6)  # cada 6 horas
-    scheduler.start()
-    investigar_hotmart()  # ejecuta apenas arranca
+    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}"
+    r = requests.get(url)
+    logging.info(f"Webhook configurado: {r.json()}")
+
+@app.get("/")
+async def home():
+    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
