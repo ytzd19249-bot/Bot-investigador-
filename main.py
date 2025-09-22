@@ -1,104 +1,59 @@
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-import requests
 import os
-import sqlite3
+import httpx
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from hotmart_api import obtener_productos, filtrar_productos, afiliar_producto
+from db import init_db, guardar_producto
+
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ADMIN_ID = os.getenv("TELEGRAM_ADMIN_ID")  # tu chat_id en Telegram
 
 app = FastAPI()
 
-# Middleware para CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ---------------------------
-# CONFIG TELEGRAM
-# ---------------------------
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
-# ---------------------------
-# BASE DE DATOS SQLITE
-# ---------------------------
-DB_NAME = "mensajes.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS mensajes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT,
-            usuario TEXT,
-            mensaje TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
 init_db()
+scheduler = AsyncIOScheduler()
 
-def guardar_mensaje(chat_id, usuario, mensaje):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO mensajes (chat_id, usuario, mensaje) VALUES (?, ?, ?)",
-                   (chat_id, usuario, mensaje))
-    conn.commit()
-    conn.close()
+async def enviar_telegram(mensaje: str):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    async with httpx.AsyncClient() as client:
+        await client.post(url, json={"chat_id": ADMIN_ID, "text": mensaje})
 
-def obtener_mensajes():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, chat_id, usuario, mensaje FROM mensajes ORDER BY id DESC")
-    datos = cursor.fetchall()
-    conn.close()
-    return datos
+async def investigar_hotmart():
+    productos = await obtener_productos()
+    filtrados = filtrar_productos(productos)
 
-def enviar_mensaje(chat_id, texto):
-    requests.post(f"{BASE_URL}/sendMessage", json={
-        "chat_id": chat_id,
-        "text": texto
-    })
+    reporte = f"📊 Reporte Hotmart\nProductos encontrados: {len(productos)}\nFiltrados: {len(filtrados)}\n"
+    for p in filtrados[:5]:  # muestra solo 5
+        nombre = p.get("name", "Sin nombre")
+        precio = p.get("price", 0)
+        comision = p.get("commission", 0)
+        link = p.get("sales_page", "#")
+        guardar_producto(nombre, precio, comision, link)
+        reporte += f"\n✅ {nombre} | 💵 {precio} | 💸 {comision}%"
 
-# ---------------------------
-# ENDPOINTS
-# ---------------------------
-@app.get("/")
-def home():
-    return {"status": "Bot Investigador funcionando 🚀"}
+    await enviar_telegram(reporte)
+
+@app.on_event("startup")
+async def startup_event():
+    scheduler.add_job(investigar_hotmart, "interval", hours=12)  # 2 veces al día
+    scheduler.start()
+    await enviar_telegram("🤖 Bot Investigador iniciado y listo 🚀")
 
 @app.post("/webhook")
 async def webhook(request: Request):
     data = await request.json()
+    message = data.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    text = message.get("text", "")
 
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        usuario = data["message"]["from"].get("username", "desconocido")
-        texto = data["message"].get("text", "")
-
-        # Guardar en BD
-        guardar_mensaje(chat_id, usuario, texto)
-
-        # Responder
-        if texto == "/start":
-            reply = "🤖 Hola mae, soy el Bot Investigador. Estoy activo 🚀"
-        elif texto == "/status":
-            reply = "✅ Todo está funcionando bien"
-        else:
-            reply = f"Recibí tu mensaje: {texto}"
-
-        enviar_mensaje(chat_id, reply)
-
+    if chat_id == int(ADMIN_ID):
+        if text.lower() == "/status":
+            await enviar_telegram("✅ Bot funcionando y vigilando Hotmart")
+        elif text.lower() == "/investigar":
+            await investigar_hotmart()
+            await enviar_telegram("🔍 Investigación ejecutada manualmente")
     return {"ok": True}
 
-@app.get("/mensajes")
-def ver_mensajes():
-    datos = obtener_mensajes()
-    return {"mensajes": [
-        {"id": d[0], "chat_id": d[1], "usuario": d[2], "mensaje": d[3]}
-        for d in datos
-    ]}
+@app.get("/")
+def home():
+    return {"status": "Bot Investigador funcionando 🚀"}
