@@ -3,8 +3,13 @@ services:
     name: bot-investigador
     env: python
     plan: free
+    runtime: python3.11
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     envVars:
-      - key: BOT_TOKEN
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: PUBLIC_URL
         sync: false
