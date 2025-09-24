@@ -1,26 +1,30 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float
-from sqlalchemy.ext.declarative import declarative_base
+# database.py
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import os
+from dotenv import load_dotenv
 
-# URL de la base de datos desde variables de entorno (.env en Render)
+# Cargar variables de entorno (.env)
+load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Crear motor de conexión
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Usar asyncpg
+# Formato: postgresql+asyncpg://usuario:password@host:port/dbname
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=True,          # Pone logs en consola (quítelo si no los quiere)
+    future=True
+)
 
-# Base para los modelos
-Base = declarative_base()
+# Creador de sesiones asincrónicas
+SessionLocal = sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
 
-# Modelo de Productos
-class Producto(Base):
-    __tablename__ = "productos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    nombre = Column(String, nullable=False)
-    precio = Column(Float, nullable=True)
-    moneda = Column(String, nullable=True)
-
-# Crear tablas si no existen
-Base.metadata.create_all(bind=engine)
+# Dependency para FastAPI
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
