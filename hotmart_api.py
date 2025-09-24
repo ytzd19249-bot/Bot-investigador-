@@ -1,54 +1,53 @@
-import os
 import logging
-import requests
-
-HOTMART_API_KEY = os.getenv("HOTMART_API_KEY")
-HOTMART_BASE_URL = "https://api-sec-vlc.hotmart.com"  # endpoint base de Hotmart
+from db import SessionLocal, Producto
+from hotmart_api import fetch_hotmart_products, affiliate_product
 
 
-def fetch_hotmart_products():
+def run_investigation():
     """
-    Consulta productos de Hotmart.
-    Retorna lista de diccionarios con info básica de productos.
+    Corre el flujo de investigación → afiliación → guardar en DB.
     """
-    url = f"{HOTMART_BASE_URL}/catalog/products"
-    headers = {"Authorization": f"Bearer {HOTMART_API_KEY}"}
-
+    db = SessionLocal()
     try:
-        r = requests.get(url, headers=headers, timeout=30)
-        r.raise_for_status()
-        data = r.json()
+        productos = fetch_hotmart_products(limit=50)
+        if not productos:
+            logging.warning("⚠️ No se encontraron productos en Hotmart.")
+            return
 
-        products = []
-        for item in data.get("items", []):
-            products.append({
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "price": item.get("price", {}).get("value"),
-                "currency": item.get("price", {}).get("currency"),
-                "sales_rank": item.get("sales_rank", 0),
-            })
-        logging.info(f"{len(products)} productos obtenidos de Hotmart.")
-        return products
+        for p in productos[:20]:  # top 20 más vendidos
+            # afiliar producto
+            link_afiliado = affiliate_product(p["id"])
+            if not link_afiliado:
+                logging.info(f"No se pudo afiliar {p['nombre']}")
+                continue
+
+            # revisar si ya está en la DB
+            prod = db.query(Producto).filter(Producto.id_externo == str(p["id"])).first()
+            if prod:
+                # actualizar
+                prod.nombre = p["nombre"]
+                prod.precio = p["precio"]
+                prod.moneda = p["moneda"]
+                prod.link = link_afiliado
+                prod.activo = True
+                logging.info(f"🔄 Producto actualizado: {p['nombre']}")
+            else:
+                # crear nuevo
+                prod = Producto(
+                    id_externo=str(p["id"]),
+                    nombre=p["nombre"],
+                    precio=p["precio"],
+                    moneda=p["moneda"],
+                    link=link_afiliado,
+                    activo=True,
+                )
+                db.add(prod)
+                logging.info(f"✅ Producto agregado: {p['nombre']}")
+
+        db.commit()
+        logging.info("🚀 Investigación completada con éxito.")
 
     except Exception as e:
-        logging.error(f"Error obteniendo productos de Hotmart: {e}")
-        return []
-
-
-def affiliate_product(product_id: str):
-    """
-    Solicita link de afiliado para un producto en Hotmart.
-    Retorna el enlace o None.
-    """
-    url = f"{HOTMART_BASE_URL}/affiliates/products/{product_id}/link"
-    headers = {"Authorization": f"Bearer {HOTMART_API_KEY}"}
-
-    try:
-        r = requests.post(url, headers=headers, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("affiliate_link")
-    except Exception as e:
-        logging.error(f"Error afiliando producto {product_id}: {e}")
-        return None
+        logging.error(f"Error en investigación: {e}")
+    finally:
+        db.close()
