@@ -1,48 +1,54 @@
-# hotmart_api.py
-"""
-Módulo para interactuar con Hotmart.
-Aquí hay funciones *simples* y comentadas. Debes completar con
-las llamadas reales a la API de Hotmart usando tus credenciales.
-"""
-
 import os
-import time
-import random
+import logging
+import requests
 
-def obtener_productos_hotmart(basic_token: str, limit: int = 50):
-    """
-    Debe llamar al endpoint de Hotmart que liste productos/trending.
-    Por ahora devuelve mocks (ejemplo). Reemplazar con httpx/requests.
-    """
-    # >>> Reemplazar con llamada real a Hotmart API <<<
-    # Ejemplo de salida esperada por elemento:
-    # {
-    #   "product_id": "hot_12345",
-    #   "title": "Curso X",
-    #   "description": "Curso sobre ...",
-    #   "price": "29.99",
-    #   "currency": "USD",
-    #   "link": "https://hotmart.com/product/...",
-    #   "affiliate_available": True
-    # }
-    resultados = []
-    for i in range(min(limit, 10)):
-        resultados.append({
-            "product_id": f"hot_{int(time.time()) % 100000}_{i}",
-            "title": f"Producto Demo {i}",
-            "description": "Descripción demo",
-            "price": str(10 + i*5),
-            "currency": "USD",
-            "link": "https://hotmart.example/demo",
-            "affiliate_available": True
-        })
-    return resultados
+HOTMART_API_KEY = os.getenv("HOTMART_API_KEY")
+HOTMART_BASE_URL = "https://api-sec-vlc.hotmart.com"  # endpoint base de Hotmart
 
-def afiliar_producto_hotmart(basic_token: str, product_id: str) -> dict:
+
+def fetch_hotmart_products():
     """
-    Aquí debes usar la API de Hotmart para afiliarte al producto (si aplica)
-    y devolver {'affiliate_link': 'https://...tu-link...'}.
-    Actualmente devuelve mock.
+    Consulta productos de Hotmart.
+    Retorna lista de diccionarios con info básica de productos.
     """
-    # >>> Reemplazar con la llamada real que hace join affiliate program <<<
-    return {"affiliate_link": f"https://hotmart.affilate.mock/{product_id}?aff=TU_AFF_ID"}
+    url = f"{HOTMART_BASE_URL}/catalog/products"
+    headers = {"Authorization": f"Bearer {HOTMART_API_KEY}"}
+
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        products = []
+        for item in data.get("items", []):
+            products.append({
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "price": item.get("price", {}).get("value"),
+                "currency": item.get("price", {}).get("currency"),
+                "sales_rank": item.get("sales_rank", 0),
+            })
+        logging.info(f"{len(products)} productos obtenidos de Hotmart.")
+        return products
+
+    except Exception as e:
+        logging.error(f"Error obteniendo productos de Hotmart: {e}")
+        return []
+
+
+def affiliate_product(product_id: str):
+    """
+    Solicita link de afiliado para un producto en Hotmart.
+    Retorna el enlace o None.
+    """
+    url = f"{HOTMART_BASE_URL}/affiliates/products/{product_id}/link"
+    headers = {"Authorization": f"Bearer {HOTMART_API_KEY}"}
+
+    try:
+        r = requests.post(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        return data.get("affiliate_link")
+    except Exception as e:
+        logging.error(f"Error afiliando producto {product_id}: {e}")
+        return None
