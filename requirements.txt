@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 httpx
-python-telegram-bot
+python-telegram-bot==20.3
+apscheduler
 sqlalchemy
 psycopg2-binary
 openai
