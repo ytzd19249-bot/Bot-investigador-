@@ -1,3 +1,4 @@
+# main.py
 import os
 import re
 import httpx
@@ -5,40 +6,27 @@ import openai
 from fastapi import FastAPI, Request, HTTPException
 from db import SessionLocal, Producto, init_db
 from sqlalchemy.orm import Session
-from telegram import Bot
 
-app = FastAPI(title="Bot Investigador")
+app = FastAPI(title="Bot de Ventas - CompraFácil / Bot Investigador")
 
-# init DB (crea tablas si no existen)
+# Inicializar DB (crea tablas si no existen)
 init_db()
 
-# ENV (poner en Render)
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")          # token del bot de Telegram
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")        # clave OpenAI (opcional)
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")          # token que usa el bot investigador para actualizar catálogo
-PUBLIC_URL = os.getenv("PUBLIC_URL", "")            # ej: https://bot-investigador.onrender.com
-REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "")    # ID de chat donde se manda reporte
+# Variables de entorno (poner en Render)
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")        # ej: 123:ABC...
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")       # opcional
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")         # token para endpoint admin
+PUBLIC_URL = os.getenv("PUBLIC_URL", "")           # ej: https://bot-investigador.onrender.com
 
-BASE_TELEGRAM = f"https://api.telegram.org/bot{BOT_TOKEN}"
+BASE_TELEGRAM = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
 
-# configurar OpenAI si existe
+# Configurar OpenAI si existe
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 
-# Bot de Telegram para reportes
-tg_bot = Bot(token=BOT_TOKEN) if BOT_TOKEN else None
-
-def send_report(text: str):
-    """Manda resumen al admin por Telegram"""
-    if tg_bot and REPORT_CHAT_ID:
-        try:
-            tg_bot.send_message(chat_id=REPORT_CHAT_ID, text=text, parse_mode="Markdown")
-        except Exception as e:
-            print("Error enviando reporte:", e)
-
-# enviar mensaje genérico a Telegram
+# Util — enviar mensaje simple a Telegram
 async def send_message(chat_id: int, text: str, parse_mode: str = "Markdown"):
-    if not BOT_TOKEN:
+    if not BASE_TELEGRAM:
         return None
     url = f"{BASE_TELEGRAM}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
@@ -49,29 +37,61 @@ async def send_message(chat_id: int, text: str, parse_mode: str = "Markdown"):
         except Exception:
             return None
 
-# normalizar texto
+# Normalizar texto
 def normalize_text(t: str) -> str:
     return re.sub(r"\s+", " ", t.strip().lower())
 
-# lógica (si en algún momento se quiere testear en Telegram)
+# Manejo de mensajes de usuario (ventas)
 async def handle_user_message(chat_id: int, text: str, db: Session):
-    t = normalize_text(text)
+    t = normalize_text(text or "")
 
-    # saludos
+    # Saluditos
     if re.search(r"\b(hola|buenas|buenos días|buenas tardes|buenas noches|hey)\b", t):
-        return await send_message(chat_id, "👋 Soy el Bot Investigador. Yo no vendo, solo investigo productos.")
+        return await send_message(chat_id, "👋 ¡Hola! Soy tu asistente de ventas. ¿En qué te ayudo hoy?")
 
-    # catálogo rápido
-    if t == "productos":
-        productos = db.query(Producto).filter(Producto.activo == True).limit(20).all()
+    # Pedir catálogo
+    if re.search(r"\b(producto|productos|catálogo|catalogo|qué tienen|qué venden|tienen)\b", t):
+        productos = db.query(Producto).filter(Producto.activo == True).order_by(Producto.created_at.desc()).limit(50).all()
         if not productos:
-            return await send_message(chat_id, "📭 No hay productos registrados todavía.")
+            return await send_message(chat_id, "📭 Por ahora no hay productos disponibles. El catálogo se actualiza automáticamente.")
         lines = [f"{p.id}. {p.nombre} — {p.precio} {p.moneda}" for p in productos]
-        return await send_message(chat_id, "📊 Productos investigados:\n\n" + "\n".join(lines))
+        text_out = "🛍️ Productos disponibles:\n\n" + "\n".join(lines[:20]) + "\n\nEscribe el número del producto para ver detalles."
+        return await send_message(chat_id, text_out)
 
-    return await send_message(chat_id, "🤖 Soy el bot investigador, trabajo en segundo plano buscando productos Hotmart.")
+    # Si es número -> detalle
+    m = re.match(r"^(\d+)$", t)
+    if m:
+        pid = int(m.group(1))
+        prod = db.query(Producto).filter(Producto.id == pid).first()
+        if not prod:
+            return await send_message(chat_id, "❌ No encontré ese producto. Escribí 'productos' para ver la lista.")
+        if not prod.activo:
+            return await send_message(chat_id, f"🚫 {prod.nombre} no está disponible.")
+        detail = f"✅ *{prod.nombre}*\n{prod.descripcion or 'Sin descripción.'}\nPrecio: {prod.precio} {prod.moneda}\nCompra: {prod.link or 'Enlace no disponible.'}"
+        return await send_message(chat_id, detail)
 
-# webhook Telegram (opcional, si quiere hablar con el bot)
+    # Si hay OpenAI -> usar IA para responder
+    if OPENAI_API_KEY:
+        try:
+            resp = openai.ChatCompletion.create(
+                model="gpt-4o-mini",  # si no está disponible, cambiar a gpt-3.5-turbo
+                messages=[
+                    {"role": "system", "content": "Eres un vendedor amable, claro y profesional. Responde en el idioma del usuario."},
+                    {"role": "user", "content": text}
+                ],
+                max_tokens=400,
+                temperature=0.6,
+            )
+            answer = resp["choices"][0]["message"]["content"]
+            return await send_message(chat_id, answer)
+        except Exception as e:
+            await send_message(chat_id, "⚠️ Error en IA. Te respondo rápidamente: " + (text[:300] if text else ""))
+            return
+
+    # Fallback
+    return await send_message(chat_id, f"🤖 Recibí tu mensaje: {text}\n(Escribe 'productos' para ver el catálogo.)")
+
+# Webhook Telegram
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     try:
@@ -94,27 +114,27 @@ async def telegram_webhook(request: Request):
 
     return {"ok": True}
 
-# Endpoint admin para actualizar catálogo
+# Endpoint admin para actualizar catálogo (usado por Bot Investigador)
 @app.post("/admin/update_products")
 async def admin_update_products(request: Request):
     token = request.headers.get("x-admin-token", "")
     if not ADMIN_TOKEN or token != ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail="Forbidden")
-
     data = await request.json()
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="Invalid body")
-
     db = SessionLocal()
     updated = []
     try:
         for k, v in data.items():
-            pid = int(k) if str(k).isdigit() else None
+            try:
+                pid = int(k)
+            except:
+                pid = None
             if pid:
                 prod = db.query(Producto).filter(Producto.id == pid).first()
             else:
                 prod = None
-
             if prod:
                 prod.nombre = v.get("nombre", prod.nombre)
                 prod.descripcion = v.get("descripcion", prod.descripcion)
@@ -138,36 +158,38 @@ async def admin_update_products(request: Request):
         db.commit()
     finally:
         db.close()
-
-    # reporte al admin
-    send_report(f"✅ Investigación completada.\nProductos actualizados: {len(updated)}")
     return {"ok": True, "updated": updated}
 
-# Endpoint admin para listar productos
-@app.get("/admin/list_products")
-async def list_products(request: Request):
-    token = request.headers.get("x-admin-token", "")
-    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    db = SessionLocal()
+# ENDPOINT DE PRUEBA: inserta un producto de prueba y lista últimos 5
+# Use esto para probar la conexión DB desde Render (sin shell).
+@app.get("/test-db")
+def test_db():
     try:
-        productos = db.query(Producto).all()
-        return [
-            {
-                "id": p.id,
-                "nombre": p.nombre,
-                "precio": p.precio,
-                "moneda": p.moneda,
-                "activo": p.activo,
-                "link": p.link,
-                "source": p.source
-            }
-            for p in productos
-        ]
-    finally:
+        # crea tablas por si acaso
+        init_db()
+        db = SessionLocal()
+        # insertar producto de prueba
+        producto = Producto(
+            nombre="Test desde endpoint /test-db",
+            descripcion="Prueba automática para verificar DB desde Render",
+            precio=1.0,
+            moneda="USD",
+            link="https://example.com/test",
+            activo=True,
+        )
+        db.add(producto)
+        db.commit()
+        db.refresh(producto)
+
+        # listar 5 últimos
+        productos = db.query(Producto).order_by(Producto.created_at.desc()).limit(5).all()
+        lista = [{"id": p.id, "nombre": p.nombre, "precio": p.precio, "activo": p.activo} for p in productos]
         db.close()
+        return {"ok": True, "insertado": producto.id, "ultimos": lista}
+    except Exception as e:
+        # devuelva el error para debugging (NO exponer en prod)
+        return {"ok": False, "error": str(e)}
 
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
+    return {"status": "ok", "message": "Bot de Ventas funcionando 🚀"}
