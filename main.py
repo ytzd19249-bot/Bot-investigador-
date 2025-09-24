@@ -1,82 +1,173 @@
 import os
-import logging
-import asyncio
-from fastapi import FastAPI
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+import re
+import httpx
+import openai
+from fastapi import FastAPI, Request, HTTPException
+from db import SessionLocal, Producto, init_db
+from sqlalchemy.orm import Session
 from telegram import Bot
-from telegram.ext import ApplicationBuilder, CommandHandler
-from database import save_products, get_products
-from hotmart_api import fetch_hotmart_products, affiliate_product
 
-# Configuración
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
-SCHEDULE_CRON_HOURS = int(os.getenv("SCHEDULE_CRON_HOURS", 12))
+app = FastAPI(title="Bot Investigador")
 
-bot = Bot(token=TELEGRAM_TOKEN)
-app = FastAPI()
-logging.basicConfig(level=logging.INFO)
+# init DB (crea tablas si no existen)
+init_db()
 
-# ---- FUNCIONES PRINCIPALES ----
-async def investigator_job():
-    logging.info("Ejecutando investigación en Hotmart...")
+# ENV (poner en Render)
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")          # token del bot de Telegram
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")        # clave OpenAI (opcional)
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")          # token que usa el bot investigador para actualizar catálogo
+PUBLIC_URL = os.getenv("PUBLIC_URL", "")            # ej: https://bot-investigador.onrender.com
+REPORT_CHAT_ID = os.getenv("REPORT_CHAT_ID", "")    # ID de chat donde se manda reporte
 
+BASE_TELEGRAM = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+# configurar OpenAI si existe
+if OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+
+# Bot de Telegram para reportes
+tg_bot = Bot(token=BOT_TOKEN) if BOT_TOKEN else None
+
+def send_report(text: str):
+    """Manda resumen al admin por Telegram"""
+    if tg_bot and REPORT_CHAT_ID:
+        try:
+            tg_bot.send_message(chat_id=REPORT_CHAT_ID, text=text, parse_mode="Markdown")
+        except Exception as e:
+            print("Error enviando reporte:", e)
+
+# enviar mensaje genérico a Telegram
+async def send_message(chat_id: int, text: str, parse_mode: str = "Markdown"):
+    if not BOT_TOKEN:
+        return None
+    url = f"{BASE_TELEGRAM}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            r = await client.post(url, json=payload)
+            return r.json()
+        except Exception:
+            return None
+
+# normalizar texto
+def normalize_text(t: str) -> str:
+    return re.sub(r"\s+", " ", t.strip().lower())
+
+# lógica (si en algún momento se quiere testear en Telegram)
+async def handle_user_message(chat_id: int, text: str, db: Session):
+    t = normalize_text(text)
+
+    # saludos
+    if re.search(r"\b(hola|buenas|buenos días|buenas tardes|buenas noches|hey)\b", t):
+        return await send_message(chat_id, "👋 Soy el Bot Investigador. Yo no vendo, solo investigo productos.")
+
+    # catálogo rápido
+    if t == "productos":
+        productos = db.query(Producto).filter(Producto.activo == True).limit(20).all()
+        if not productos:
+            return await send_message(chat_id, "📭 No hay productos registrados todavía.")
+        lines = [f"{p.id}. {p.nombre} — {p.precio} {p.moneda}" for p in productos]
+        return await send_message(chat_id, "📊 Productos investigados:\n\n" + "\n".join(lines))
+
+    return await send_message(chat_id, "🤖 Soy el bot investigador, trabajo en segundo plano buscando productos Hotmart.")
+
+# webhook Telegram (opcional, si quiere hablar con el bot)
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
     try:
-        products = fetch_hotmart_products()
+        update = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json")
 
-        best_products = []
-        for product in products:
-            if product.get("sales_rank", 0) > 80:  # ejemplo de filtro
-                aff_link = affiliate_product(product["id"])
-                if aff_link:
-                    product["affiliate_link"] = aff_link
-                    best_products.append(product)
+    if "message" not in update:
+        return {"ok": True}
 
-        if best_products:
-            save_products(best_products)
-            logging.info(f"{len(best_products)} productos guardados en DB.")
-        else:
-            logging.info("No se encontraron productos destacados.")
+    msg = update["message"]
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text", "")
 
-    except Exception as e:
-        logging.error(f"Error en investigator_job: {e}")
+    db = SessionLocal()
+    try:
+        await handle_user_message(chat_id, text, db)
+    finally:
+        db.close()
 
+    return {"ok": True}
 
-# ---- COMANDOS ADMIN ----
-async def admin_report(update, context):
-    if context.args and context.args[0] == ADMIN_TOKEN:
-        products = get_products(limit=10)
-        if not products:
-            await update.message.reply_text("No hay productos registrados aún.")
-            return
+# Endpoint admin para actualizar catálogo
+@app.post("/admin/update_products")
+async def admin_update_products(request: Request):
+    token = request.headers.get("x-admin-token", "")
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
-        msg = "📊 Últimos productos investigados:\n\n"
-        for p in products:
-            msg += f"- {p['name']} | {p['affiliate_link']}\n"
-        await update.message.reply_text(msg)
-    else:
-        await update.message.reply_text("❌ Acceso denegado.")
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid body")
 
+    db = SessionLocal()
+    updated = []
+    try:
+        for k, v in data.items():
+            pid = int(k) if str(k).isdigit() else None
+            if pid:
+                prod = db.query(Producto).filter(Producto.id == pid).first()
+            else:
+                prod = None
 
-# ---- TELEGRAM APP ----
-telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-telegram_app.add_handler(CommandHandler("report", admin_report))
+            if prod:
+                prod.nombre = v.get("nombre", prod.nombre)
+                prod.descripcion = v.get("descripcion", prod.descripcion)
+                prod.precio = float(v.get("precio", prod.precio or 0))
+                prod.moneda = v.get("moneda", prod.moneda or "USD")
+                prod.link = v.get("link", prod.link)
+                prod.source = v.get("source", prod.source)
+                prod.activo = v.get("activo", prod.activo)
+            else:
+                new = Producto(
+                    nombre=v.get("nombre", "Sin nombre"),
+                    descripcion=v.get("descripcion", ""),
+                    precio=float(v.get("precio", 0)),
+                    moneda=v.get("moneda", "USD"),
+                    link=v.get("link"),
+                    source=v.get("source"),
+                    activo=v.get("activo", True),
+                )
+                db.add(new)
+            updated.append(k)
+        db.commit()
+    finally:
+        db.close()
 
+    # reporte al admin
+    send_report(f"✅ Investigación completada.\nProductos actualizados: {len(updated)}")
+    return {"ok": True, "updated": updated}
 
-# ---- SCHEDULER ----
-scheduler = AsyncIOScheduler()
-scheduler.add_job(
-    investigator_job,
-    IntervalTrigger(hours=SCHEDULE_CRON_HOURS),
-    id="investigator_job",
-    replace_existing=True,
-)
-scheduler.start()
+# Endpoint admin para listar productos
+@app.get("/admin/list_products")
+async def list_products(request: Request):
+    token = request.headers.get("x-admin-token", "")
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
+    db = SessionLocal()
+    try:
+        productos = db.query(Producto).all()
+        return [
+            {
+                "id": p.id,
+                "nombre": p.nombre,
+                "precio": p.precio,
+                "moneda": p.moneda,
+                "activo": p.activo,
+                "link": p.link,
+                "source": p.source
+            }
+            for p in productos
+        ]
+    finally:
+        db.close()
 
-# ---- FASTAPI ----
-@app.on_event("startup")
-async def on_startup():
-    logging.info("Bot Investigador iniciado.")
-    asyncio.create_task(telegram_app.run_polling())
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Bot Investigador funcionando 🚀"}
