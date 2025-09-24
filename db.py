@@ -4,21 +4,17 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import os
 
+# 🔑 URL tomada desde Render
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Ajustar prefijo si viene como "postgres://"
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
-
-# Forzar SSL
-if DATABASE_URL and "sslmode" not in DATABASE_URL:
-    DATABASE_URL += "?sslmode=require"
-
-# Engine
-engine = create_engine(DATABASE_URL, echo=True)
+# 🔒 Conexión segura forzada con sslmode=require
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"sslmode": "require"}
+)
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
 Base = declarative_base()
 
 class Producto(Base):
