@@ -1,8 +1,8 @@
 services:
   - type: web
-    name: bot-investigador
+    name: bot-ventas
     env: python
     runtime: python-3.10.14
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    autoDeploy: true
+    autoDeploy
