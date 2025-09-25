@@ -1,95 +1,83 @@
 from fastapi import FastAPI, Request
 import requests
-import sqlite3
+import psycopg2
+import os
 
 app = FastAPI()
 
-# Token del bot
-BOT_TOKEN = "8255571596:AAEvqpVQR__FYQUerAVZtEWXNWu1ZtHT3r8"
+# =========================
+# Configuración
+# =========================
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # token del bot
+CANAL_ID = "@infoventas2025"        # canal público
+DATABASE_URL = os.getenv("DATABASE_URL")  # conexión a PostgreSQL (Render la da)
 
-# Canal donde quiere publicar
-CHANNEL_ID = "@infoventas"
+# =========================
+# Conexión a la base de datos
+# =========================
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
-# --- Base de datos ---
-def init_db():
-    conn = sqlite3.connect("productos.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS productos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            precio TEXT,
-            link TEXT
-        )
-    """)
+def guardar_producto(nombre, descripcion, precio, link_afiliado, categoria, creador):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO productos (nombre, descripcion, precio, link, categoria, creador)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (nombre, descripcion, precio, link_afiliado, categoria, creador)
+    )
     conn.commit()
+    cur.close()
     conn.close()
 
-def guardar_producto(nombre, precio, link):
-    conn = sqlite3.connect("productos.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO productos (nombre, precio, link) VALUES (?, ?, ?)", (nombre, precio, link))
-    conn.commit()
-    conn.close()
-
-# --- Enviar mensaje a canal ---
+# =========================
+# Enviar mensaje al canal
+# =========================
 def send_message_to_channel(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHANNEL_ID, "text": text}
-    requests.post(url, data=data)
+    data = {"chat_id": CANAL_ID, "text": text, "parse_mode": "HTML"}
+    response = requests.post(url, data=data)
+    return response.json()
 
-# --- Enviar mensaje directo ---
-def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": chat_id, "text": text}
-    requests.post(url, data=data)
-
-# --- Webhook ---
+# =========================
+# Webhook
+# =========================
 @app.post("/webhook")
-async def webhook(req: Request):
-    data = await req.json()
+async def webhook(request: Request):
+    data = await request.json()
+    message = data.get("message", {}).get("text", "")
 
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        text = data["message"].get("text", "")
+    if message.startswith("/investigar"):
+        # 🔎 Producto ficticio de prueba
+        nombre = "Curso de Marketing Digital"
+        descripcion = "Aprende a vender en internet desde cero con estrategias probadas."
+        precio = "$49"
+        link_afiliado = "https://go.hotmart.com/ABC123?ap=XYZ789"
+        categoria = "Marketing"
+        creador = "Juan Pérez"
 
-        if text == "/investigar":
-            nombre = "Ejemplo"
-            precio = "$25"
-            link = "https://amazon.com/ejemplo"
+        # Guardar en DB
+        guardar_producto(nombre, descripcion, precio, link_afiliado, categoria, creador)
 
-            producto = f"🔎 Nuevo producto:\nNombre: {nombre}\nPrecio: {precio}\nLink: {link}"
-
-            # Guardar en DB
-            guardar_producto(nombre, precio, link)
-
-            # Responder al usuario
-            send_message(chat_id, "✅ Producto investigado y guardado, se mandó al canal Infoventas")
-
-            # Mandar al canal
-            send_message_to_channel(producto)
-
-        elif text == "/productos":
-            # Recuperar productos de la DB
-            conn = sqlite3.connect("productos.db")
-            cursor = conn.cursor()
-            cursor.execute("SELECT nombre, precio, link FROM productos ORDER BY id DESC LIMIT 5")
-            rows = cursor.fetchall()
-            conn.close()
-
-            if rows:
-                lista = "📦 Últimos productos:\n\n"
-                for r in rows:
-                    lista += f"- {r[0]} ({r[1]})\n{r[2]}\n\n"
-            else:
-                lista = "❌ No hay productos guardados."
-
-            send_message(chat_id, lista)
-
-        elif text == "/start":
-            send_message(chat_id, "👋 Hola, soy tu bot investigador.\n\nComandos disponibles:\n/investigar → Simular investigación\n/productos → Ver últimos guardados")
+        # Notificar al canal
+        resultado = (
+            f"🔎 <b>Nuevo producto investigado:</b>\n\n"
+            f"📌 <b>{nombre}</b>\n"
+            f"💡 {descripcion}\n"
+            f"💵 {precio}\n"
+            f"📂 {categoria}\n"
+            f"👨‍💻 Creador: {creador}\n"
+            f"🔗 <a href='{link_afiliado}'>Comprar aquí</a>"
+        )
+        send_message_to_channel(resultado)
 
     return {"ok": True}
 
-# Inicializar DB al arrancar
-init_db()
+# =========================
+# Root
+# =========================
+@app.get("/")
+async def root():
+    return {"status": "Bot investigador activo ✅"}
