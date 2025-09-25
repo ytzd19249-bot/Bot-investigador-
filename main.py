@@ -10,13 +10,32 @@ app = FastAPI()
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # token del bot
 CANAL_ID = "@infoventas2025"        # canal público
-DATABASE_URL = os.getenv("DATABASE_URL")  # conexión a PostgreSQL (Render la da)
+DATABASE_URL = os.getenv("DATABASE_URL")  # conexión a PostgreSQL
 
 # =========================
 # Conexión a la base de datos
 # =========================
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
+
+def ensure_table():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS productos (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT NOT NULL,
+        descripcion TEXT,
+        precio TEXT,
+        link TEXT,
+        categoria TEXT,
+        creador TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def guardar_producto(nombre, descripcion, precio, link_afiliado, categoria, creador):
     conn = get_db_connection()
@@ -81,3 +100,6 @@ async def webhook(request: Request):
 @app.get("/")
 async def root():
     return {"status": "Bot investigador activo ✅"}
+
+# Crear tabla al iniciar
+ensure_table()
