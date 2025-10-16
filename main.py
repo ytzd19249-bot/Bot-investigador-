@@ -1,10 +1,7 @@
 from fastapi import FastAPI, Request
 import os
 import asyncio
-from dotenv import load_dotenv
-from core.researcher import run_research
-
-load_dotenv()
+from researcher import run_research  # ✅ corregido (sin carpeta core)
 
 app = FastAPI()
 
@@ -48,14 +45,11 @@ async def debug_run(request: Request):
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    # Aquí podrías procesar mensajes si querés que responda directamente
     return {"ok": True}
 
 # ==========================================================
-# ARRANQUE AUTOMÁTICO (por si se usa programador interno)
+# ARRANQUE AUTOMÁTICO
 # ==========================================================
 @app.on_event("startup")
 async def startup_event():
     print("🚀 Bot investigador iniciado correctamente.")
-    # Si querés que corra al iniciar, descomentá esta línea:
-    # await run_research()
