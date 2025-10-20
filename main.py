@@ -1,17 +1,16 @@
-# main.py  — Bot Investigador
+# main.py — BOT INVESTIGADOR
+from fastapi import FastAPI, Request
 import os
 import asyncio
-from typing import Dict, Any
-from fastapi import FastAPI, Request
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import httpx
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-app = FastAPI()
+app = FastAPI(title="Bot Investigador", version="2.0")
 
 # ==========================================================
 # VARIABLES DE ENTORNO
 # ==========================================================
-SALES_PUBLIC_URL = os.getenv("SALES_PUBLIC_URL")  # Ej: https://vendedorbt.onrender.com
+SALES_PUBLIC_URL = os.getenv("SALES_PUBLIC_URL", "https://vendedorbt.onrender.com")
 SALES_ADMIN_TOKEN = os.getenv("SALES_ADMIN_TOKEN", "ventas_admin_12345")
 
 if not SALES_PUBLIC_URL or not SALES_ADMIN_TOKEN:
@@ -22,74 +21,64 @@ else:
 # ==========================================================
 # FUNCIÓN PRINCIPAL
 # ==========================================================
-async def run_research() -> Dict[str, Any]:
+async def run_research():
     """
-    Investiga productos y los envía al bot de ventas.
+    Simula la investigación de productos y los envía al bot de ventas.
     """
-    print("🔎 Ejecutando investigación...")
+    print("🔎 Ejecutando investigación de productos...")
 
-    # Ejemplo de productos encontrados
     productos = [
         {
-            "titulo": "Reloj Deportivo Inteligente",
+            "titulo": "Reloj deportivo inteligente",
             "precio": 39.99,
+            "categoria": "Tecnología",
+            "link_afiliado": "https://afiliado.com/reloj",
+        },
+        {
+            "titulo": "Auriculares Bluetooth Pro",
+            "precio": 59.90,
             "categoria": "Electrónica",
-            "link_afiliado": "https://hotmart.com/reloj"
+            "link_afiliado": "https://afiliado.com/auriculares",
         },
         {
-            "titulo": "Audífonos Bluetooth",
-            "precio": 25.50,
-            "categoria": "Audio",
-            "link_afiliado": "https://hotmart.com/audifonos"
-        },
-        {
-            "titulo": "Zapatillas Deportivas",
-            "precio": 49.90,
+            "titulo": "Zapatos deportivos unisex",
+            "precio": 74.50,
             "categoria": "Moda",
-            "link_afiliado": "https://hotmart.com/zapatillas"
-        }
+            "link_afiliado": "https://afiliado.com/zapatos",
+        },
     ]
 
-    # Enviar productos al bot de ventas
-    async with httpx.AsyncClient() as client:
-        url = f"{SALES_PUBLIC_URL}/ingestion/productos"
-        headers = {"Authorization": f"Bearer {SALES_ADMIN_TOKEN}"}
-        payload = {"productos": productos}
-
-        try:
-            res = await client.post(url, json=payload, headers=headers, timeout=30)
-            print("📦 Respuesta del bot de ventas:", res.json())
-        except Exception as e:
-            print("❌ Error enviando productos:", e)
-
-    return {"ok": True, "sent_to": SALES_PUBLIC_URL, "productos_enviados": len(productos)}
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"{SALES_PUBLIC_URL}/ingestion/productos",
+                headers={"Authorization": f"Bearer {SALES_ADMIN_TOKEN}"},
+                json={"productos": productos},
+                timeout=20,
+            )
+        print(f"📤 Enviados {len(productos)} productos al bot de ventas.")
+        print("🧠 Respuesta del bot de ventas:", res.text)
+    except Exception as e:
+        print(f"❌ Error enviando productos: {e}")
 
 # ==========================================================
-# RUTAS FASTAPI
+# RUTAS
 # ==========================================================
 @app.get("/")
 async def home():
-    return {"ok": True, "message": "Bot Investigador en línea ✅"}
+    return {"ok": True, "bot": "investigador", "status": "activo"}
 
 @app.post("/debug/run")
 async def debug_run(request: Request):
     """
-    Permite ejecutar la investigación manualmente desde Render o Postman.
+    Permite ejecutar manualmente la investigación desde el navegador o Postman.
     """
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-
-    print("🧠 Ejecución manual solicitada:", payload)
-    result = await run_research()
-    return {"ok": True, "message": "Investigación ejecutada correctamente", "result": result}
+    print("🧠 Ejecución manual solicitada...")
+    await run_research()
+    return {"ok": True, "mensaje": "Investigación ejecutada manualmente."}
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    """
-    Solo para compatibilidad con Telegram.
-    """
     _ = await request.json()
     return {"ok": True}
 
@@ -100,7 +89,7 @@ scheduler = AsyncIOScheduler()
 
 @scheduler.scheduled_job("interval", hours=12)
 async def scheduled_research():
-    print("⏰ Ejecutando investigación automática cada 12h...")
+    print("⏰ Investigación automática (cada 12h)...")
     await run_research()
 
 @app.on_event("startup")
